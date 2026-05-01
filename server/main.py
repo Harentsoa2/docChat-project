@@ -61,6 +61,16 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 def _enqueue_registered_document(
     payload: DocumentCreate,
     background_tasks: BackgroundTasks,
