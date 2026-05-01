@@ -1,0 +1,530 @@
+openapi: 3.0.3
+info:
+  title: Chat with Document API
+  version: 1.0.0
+  description: |
+    API pour la gestion multi-projets de documents PDF uploades via UploadThing.
+
+    Workflow principal:
+    1. Le frontend upload le PDF vers UploadThing.
+    2. Le frontend envoie `file_url`, `file_key`, `project_id` et `filename` au backend.
+    3. Le backend enregistre le document en base PostgreSQL avec le statut `processing`.
+    4. Un traitement asynchrone lance le pipeline RAG et met a jour le statut (`ready` ou `error`).
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+tags:
+  - name: Projects
+    description: Operations sur les projets.
+  - name: Documents
+    description: Enregistrement et suivi des documents UploadThing.
+  - name: Chat
+    description: Question-reponse basee sur les documents indexes d'un projet.
+
+paths:
+  /projects:
+    post:
+      tags: [Projects]
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+            example:
+              name: Legal archive
+              description: Documents juridiques du client A
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      responses:
+        '200':
+          description: Projects list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectResponse'
+
+  /projects/{project_id}:
+    delete:
+      tags: [Projects]
+      summary: Delete a project and all its documents
+      description: |
+        Deletes:
+        1. All UploadThing files linked to project documents
+        2. All Pinecone vectors for this project
+        3. The project and all related documents in PostgreSQL
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project deleted with external resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteProjectResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '502':
+          $ref: '#/components/responses/ExternalServiceError'
+
+  /documents:
+    post:
+      tags: [Documents]
+      summary: Register an UploadThing document
+      description: |
+        Endpoint recommande quand le frontend possede deja `project_id`.
+        Enregistre le document en DB et declenche le traitement asynchrone RAG.
+      operationId: registerDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentCreate'
+            example:
+              project_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              filename: contract.pdf
+              file_url: https://utfs.io/f/example.pdf
+              file_key: doc_abc123
+      responses:
+        '202':
+          description: Document accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /projects/{project_id}/documents:
+    post:
+      tags: [Documents]
+      summary: Register an UploadThing document for a specific project
+      operationId: registerProjectDocument
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectDocumentCreate'
+            example:
+              filename: invoice.pdf
+              file_url: https://utfs.io/f/example2.pdf
+              file_key: doc_xyz987
+      responses:
+        '202':
+          description: Document accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags: [Documents]
+      summary: List documents for a project
+      operationId: listProjectDocuments
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Documents list for the project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocumentResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /documents/{document_id}:
+    get:
+      tags: [Documents]
+      summary: Get document status
+      operationId: getDocumentStatus
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document metadata and processing status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      tags: [Documents]
+      summary: Delete one PDF document and its external resources
+      description: |
+        Deletes:
+        1. UploadThing file by `file_key`
+        2. Pinecone vectors for this document
+        3. Document record in PostgreSQL
+      operationId: deleteDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document deleted with external resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteDocumentResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '502':
+          $ref: '#/components/responses/ExternalServiceError'
+
+  /projects/{project_id}/chat:
+    post:
+      tags: [Chat]
+      summary: Ask a question against project documents
+      operationId: chatWithProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageCreate'
+            example:
+              content: Quel est le montant total de la facture ?
+      responses:
+        '200':
+          description: Answer generated from project context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      description: Unique project identifier
+      schema:
+        type: string
+        format: uuid
+      example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      description: Unique document identifier
+      schema:
+        type: string
+        format: uuid
+      example: 9f4c1f3e-4a88-4f2d-8e16-13fe95b7f90b
+
+  responses:
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: Project 3fa85f64-5717-4562-b3fc-2c963f66afa6 was not found
+    ConflictError:
+      description: Conflict on unique data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: A document with this UploadThing file_key already exists
+    ValidationError:
+      description: Request validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+    ExternalServiceError:
+      description: External service failure (UploadThing or Pinecone)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: UploadThing deletion failed for file_key=doc_abc123 (status=500, body=...)
+
+  schemas:
+    ProjectCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+
+    ProjectResponse:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        name:
+          type: string
+          example: Legal archive
+        description:
+          type: string
+          nullable: true
+          example: Documents juridiques du client A
+        created_at:
+          type: string
+          format: date-time
+          example: 2026-04-30T10:12:00Z
+
+    DocumentStatus:
+      type: string
+      enum: [pending, processing, ready, error]
+      example: processing
+
+    DocumentCreate:
+      type: object
+      required: [project_id, filename, file_url, file_key]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        filename:
+          type: string
+          description: PDF filename only (no path)
+          minLength: 1
+          maxLength: 255
+          example: contract.pdf
+        file_url:
+          type: string
+          format: uri
+          example: https://utfs.io/f/example.pdf
+        file_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          example: doc_abc123
+
+    ProjectDocumentCreate:
+      type: object
+      required: [filename, file_url, file_key]
+      properties:
+        filename:
+          type: string
+          description: PDF filename only (no path)
+          minLength: 1
+          maxLength: 255
+          example: invoice.pdf
+        file_url:
+          type: string
+          format: uri
+          example: https://utfs.io/f/example2.pdf
+        file_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          example: doc_xyz987
+
+    DocumentResponse:
+      type: object
+      required:
+        - id
+        - project_id
+        - filename
+        - file_url
+        - file_key
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 9f4c1f3e-4a88-4f2d-8e16-13fe95b7f90b
+        project_id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        filename:
+          type: string
+          example: contract.pdf
+        file_url:
+          type: string
+          format: uri
+          example: https://utfs.io/f/example.pdf
+        file_key:
+          type: string
+          example: doc_abc123
+        status:
+          $ref: '#/components/schemas/DocumentStatus'
+        error_message:
+          type: string
+          nullable: true
+          example: null
+        created_at:
+          type: string
+          format: date-time
+          example: 2026-04-30T10:15:00Z
+
+    DeleteDocumentResponse:
+      type: object
+      required:
+        - deleted
+        - document_id
+        - project_id
+        - uploadthing_deleted
+        - pinecone_deleted
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        document_id:
+          type: string
+          format: uuid
+          example: 9f4c1f3e-4a88-4f2d-8e16-13fe95b7f90b
+        project_id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        uploadthing_deleted:
+          type: boolean
+          example: true
+        pinecone_deleted:
+          type: boolean
+          example: true
+
+    DeleteProjectResponse:
+      type: object
+      required:
+        - deleted
+        - project_id
+        - documents_deleted
+        - uploadthing_files_deleted
+        - pinecone_deleted
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        project_id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        documents_deleted:
+          type: integer
+          example: 4
+        uploadthing_files_deleted:
+          type: integer
+          example: 4
+        pinecone_deleted:
+          type: boolean
+          example: true
+
+    MessageCreate:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          example: Resume moi ce document.
+
+    SourceItem:
+      type: object
+      required: [document, page, content]
+      properties:
+        document:
+          type: string
+          example: contract.pdf
+        page:
+          type: integer
+          example: 2
+        content:
+          type: string
+          example: Le montant total HT est de 12 500 EUR...
+
+    ChatResponse:
+      type: object
+      required: [answer, sources]
+      properties:
+        answer:
+          type: string
+          example: Le montant total mentionne dans la facture est de 12 500 EUR HT.
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceItem'
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          example: Project 3fa85f64-5717-4562-b3fc-2c963f66afa6 was not found
+
+    ValidationErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+
+    ValidationErrorItem:
+      type: object
+      required: [loc, msg, type]
+      properties:
+        loc:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string
