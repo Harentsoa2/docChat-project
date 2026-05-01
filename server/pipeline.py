@@ -5,20 +5,17 @@ from uuid import UUID
 
 import requests
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from openai import AsyncOpenAI
 from pinecone import Pinecone, ServerlessSpec
-from unstructured.chunking.title import chunk_by_title
-from unstructured.partition.pdf import partition_pdf
 
 load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "chat-docs")
+PDF_PARTITION_STRATEGY = os.getenv("PDF_PARTITION_STRATEGY", "hi_res")
 
 _pinecone_client = None
-_embeddings = None
-_llm = None
+_openai_client = None
 
 
 def get_pinecone_client():
@@ -30,18 +27,28 @@ def get_pinecone_client():
     return _pinecone_client
 
 
-def get_embeddings():
-    global _embeddings
-    if _embeddings is None:
-        _embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    return _embeddings
+def get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI()
+    return _openai_client
 
 
-def get_llm():
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    return _llm
+async def embed_text(text: str) -> List[float]:
+    response = await get_openai_client().embeddings.create(
+        model="text-embedding-3-small",
+        input=text,
+    )
+    return response.data[0].embedding
+
+
+async def generate_answer(messages: List[Dict]) -> str:
+    response = await get_openai_client().chat.completions.create(
+        model="gpt-4o-mini",
+        temperature=0,
+        messages=messages,
+    )
+    return response.choices[0].message.content or ""
 
 
 def init_pinecone():
@@ -80,6 +87,9 @@ async def process_document_from_url(
     filename: str,
 ):
     """Download the UploadThing file and index it for project-scoped RAG."""
+    from unstructured.chunking.title import chunk_by_title
+    from unstructured.partition.pdf import partition_pdf
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -88,13 +98,20 @@ async def process_document_from_url(
             tmp_file.write(response.content)
             tmp_path = tmp_file.name
 
-        elements = partition_pdf(
-            filename=tmp_path,
-            strategy="hi_res",
-            infer_table_structure=True,
-            extract_image_block_types=["Image"],
-            extract_image_block_to_payload=True,
-        )
+        partition_kwargs = {
+            "filename": tmp_path,
+            "strategy": PDF_PARTITION_STRATEGY,
+        }
+        if PDF_PARTITION_STRATEGY == "hi_res":
+            partition_kwargs.update(
+                {
+                    "infer_table_structure": True,
+                    "extract_image_block_types": ["Image"],
+                    "extract_image_block_to_payload": True,
+                }
+            )
+
+        elements = partition_pdf(**partition_kwargs)
 
         chunks = chunk_by_title(
             elements,
@@ -104,13 +121,12 @@ async def process_document_from_url(
         )
 
         index = init_pinecone()
-        embeddings = get_embeddings()
         vectors = []
 
         for i, chunk in enumerate(chunks):
             content = chunk.text
             metadata = chunk.metadata.to_dict()
-            embedding = await embeddings.aembed_query(content)
+            embedding = await embed_text(content)
 
             vectors.append(
                 {
@@ -150,10 +166,8 @@ async def query_project(
 ):
     """Search project vectors and generate an answer with citations."""
     index = init_pinecone()
-    embeddings = get_embeddings()
-    llm = get_llm()
 
-    query_embedding = await embeddings.aembed_query(query)
+    query_embedding = await embed_text(query)
 
     results = index.query(
         vector=query_embedding,
@@ -184,20 +198,20 @@ CONTEXTE:
 {context}
 """
 
-    messages = [SystemMessage(content=system_prompt)]
+    messages = [{"role": "system", "content": system_prompt}]
     if chat_history:
         for message in chat_history:
             role = message["role"]
             content = message["content"]
             if role == "user":
-                messages.append(HumanMessage(content=content))
-            else:
-                messages.append(SystemMessage(content=content))
+                messages.append({"role": "user", "content": content})
+            elif role == "assistant":
+                messages.append({"role": "assistant", "content": content})
 
-    messages.append(HumanMessage(content=query))
-    response = await llm.ainvoke(messages)
+    messages.append({"role": "user", "content": query})
+    answer = await generate_answer(messages)
 
     return {
-        "answer": response.content,
+        "answer": answer,
         "sources": sources,
     }

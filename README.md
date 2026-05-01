@@ -9,7 +9,7 @@ DocChat is a full stack document chat application. Users create projects, upload
 - File uploads: UploadThing.
 - Document parsing: Unstructured, PDF OCR/table/image extraction helpers.
 - Vector database: Pinecone.
-- AI orchestration: LangChain with OpenAI models.
+- AI provider: OpenAI SDK for embeddings and chat completions.
 
 ## Main Features
 
@@ -51,7 +51,7 @@ The AI configuration is currently defined in `server/pipeline.py`.
 
 - Embeddings model: `text-embedding-3-small`
 - Chat model: `gpt-4o-mini`
-- LLM provider: OpenAI, through `langchain-openai`
+- LLM provider: OpenAI, through the official OpenAI Python SDK
 - Retrieval: Pinecone vector search with cosine similarity
 - Generation style: project-scoped RAG. The assistant is instructed to answer only from retrieved context and cite sources.
 
@@ -64,12 +64,9 @@ fastapi[standard]
 uvicorn
 pydantic-settings
 sqlalchemy
-psycopg2
+psycopg2-binary
 unstructured[pdf]
 unstructured-inference
-langchain
-langchain-openai
-langchain-community
 pinecone
 openai
 python-dotenv
@@ -92,6 +89,10 @@ DATABASE_URL=postgresql://user:password@localhost:5432/chat_docs
 OPENAI_API_KEY=your_openai_api_key
 PINECONE_API_KEY=your_pinecone_api_key
 PINECONE_INDEX_NAME=chat-docs
+
+# Optional. Use fast on small hosts such as Render free instances.
+# Use hi_res for better layout/table/image extraction, but it requires more memory.
+PDF_PARTITION_STRATEGY=fast
 
 # Used by the backend when deleting files from UploadThing
 UPLOADTHING_SECRET=your_uploadthing_secret

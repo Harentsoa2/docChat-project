@@ -5,9 +5,6 @@ sqlalchemy
 psycopg2-binary
 unstructured[pdf]
 unstructured-inference
-langchain
-langchain-openai
-langchain-community
 pinecone
 openai
 python-dotenv

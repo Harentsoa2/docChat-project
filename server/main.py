@@ -1,4 +1,5 @@
 import json
+import os
 from contextlib import asynccontextmanager
 from typing import List
 from uuid import UUID
@@ -206,8 +207,6 @@ async def chat_with_project(
 
     return result
 
-
-import os
 import uvicorn
 
 if __name__ == "__main__":
