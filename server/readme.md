@@ -71,6 +71,7 @@ uvicorn main:app --reload
 - `GET /projects/{project_id}/documents` lists project documents.
 - `GET /documents/{document_id}` checks processing status.
 - `DELETE /documents/{document_id}` deletes one PDF, its UploadThing file, and its Pinecone vectors.
+- `GET /projects/{project_id}/messages` lists saved chat messages for a project.
 - `POST /projects/{project_id}/chat` asks a question against indexed project documents.
 
 ## API Specification

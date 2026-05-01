@@ -207,6 +207,25 @@ paths:
         '502':
           $ref: '#/components/responses/ExternalServiceError'
 
+  /projects/{project_id}/messages:
+    get:
+      tags: [Chat]
+      summary: List saved chat messages for a project
+      operationId: listProjectMessages
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Saved chat messages for the project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
   /projects/{project_id}/chat:
     post:
       tags: [Chat]
@@ -496,6 +515,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SourceItem'
+
+    ChatMessageResponse:
+      type: object
+      required: [id, project_id, role, content, sources, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        sources:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SourceItem'
+        created_at:
+          type: string
+          format: date-time
 
     ErrorResponse:
       type: object

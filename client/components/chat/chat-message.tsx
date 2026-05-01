@@ -14,7 +14,7 @@ interface ChatMessageProps {
   message: {
     role: "user" | "assistant"
     content: string
-    sources?: ChatResponse["sources"]
+    sources?: ChatResponse["sources"] | null
   }
 }
 

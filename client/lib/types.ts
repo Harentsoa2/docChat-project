@@ -70,6 +70,15 @@ export interface ChatResponse {
   sources: SourceItem[]
 }
 
+export interface ChatMessageResponse {
+  id: string
+  project_id: string
+  role: "user" | "assistant"
+  content: string
+  sources: SourceItem[] | null
+  created_at: string
+}
+
 // Error types
 export interface ErrorResponse {
   detail: string

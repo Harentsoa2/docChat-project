@@ -11,6 +11,7 @@ from database import get_db, init_db
 from models import ChatMessage
 from pipeline import query_project
 from schemas import (
+    ChatMessageResponse,
     ChatResponse,
     DeleteDocumentResponse,
     DeleteProjectResponse,
@@ -154,6 +155,21 @@ def delete_project(project_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ExternalDeletionError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/messages", response_model=List[ChatMessageResponse])
+def list_project_messages(project_id: UUID, db: Session = Depends(get_db)):
+    try:
+        require_project(db, project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return (
+        db.query(ChatMessage)
+        .filter(ChatMessage.project_id == project_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
 
 
 @app.post("/projects/{project_id}/chat", response_model=ChatResponse)

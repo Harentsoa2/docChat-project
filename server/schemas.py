@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -79,6 +80,29 @@ class MessageCreate(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: List[dict]
+
+
+class ChatMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    role: str
+    content: str
+    sources: Optional[List[dict]]
+    created_at: datetime
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def parse_sources(cls, value):
+        if value in (None, ""):
+            return None
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return None
+        return value
 
 
 class DeleteDocumentResponse(BaseModel):
