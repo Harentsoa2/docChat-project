@@ -1,0 +1,20 @@
+FROM python:3.10-slim
+
+# Installer dépendances système
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    tesseract-ocr \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dossier app
+WORKDIR /app
+
+# Copier fichiers
+COPY . .
+
+# Installer dépendances Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Lancer app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
