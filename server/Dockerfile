@@ -1,12 +1,19 @@
 FROM python:3.10-slim
 
+RUN pip install --upgrade pip
 # Installer dépendances système
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     tesseract-ocr \
     libmagic1 \
+    build-essential \
+    gcc \
+    g++ \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
-
+    
 # Dossier app
 WORKDIR /app
 
