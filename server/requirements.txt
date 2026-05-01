@@ -2,7 +2,7 @@ fastapi[standard]
 uvicorn
 pydantic-settings
 sqlalchemy
-psycopg2
+psycopg2-binary
 unstructured[pdf]
 unstructured-inference
 langchain
