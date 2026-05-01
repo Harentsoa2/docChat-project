@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 ENV PORT=10000
+ENV PDF_PARTITION_STRATEGY=fast
 
 RUN pip install --upgrade pip
 

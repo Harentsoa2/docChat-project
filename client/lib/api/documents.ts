@@ -36,14 +36,3 @@ export async function deleteDocument(
     method: "DELETE",
   })
 }
-
-export async function processProjectDocuments(
-  projectId: string
-): Promise<{ processed: number; message: string }> {
-  return apiClient<{ processed: number; message: string }>(
-    `/projects/${projectId}/process`,
-    {
-      method: "POST",
-    }
-  )
-}

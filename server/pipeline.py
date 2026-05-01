@@ -12,7 +12,7 @@ load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "chat-docs")
-PDF_PARTITION_STRATEGY = os.getenv("PDF_PARTITION_STRATEGY", "hi_res")
+PDF_PARTITION_STRATEGY = os.getenv("PDF_PARTITION_STRATEGY", "fast")
 
 _pinecone_client = None
 _openai_client = None

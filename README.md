@@ -90,7 +90,7 @@ OPENAI_API_KEY=your_openai_api_key
 PINECONE_API_KEY=your_pinecone_api_key
 PINECONE_INDEX_NAME=chat-docs
 
-# Optional. Use fast on small hosts such as Render free instances.
+# Optional. The backend defaults to fast.
 # Use hi_res for better layout/table/image extraction, but it requires more memory.
 PDF_PARTITION_STRATEGY=fast
 
