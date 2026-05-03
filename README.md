@@ -2,7 +2,7 @@
 
 DocChat is a full stack document chat application. Users create projects, upload PDF files, wait for the backend to index them, then ask questions against the indexed project documents using a Retrieval-Augmented Generation pipeline.
 
-NB: To reduce hosting costs and memory usage in production, the deployed backend uses a simplified PDF processing pipeline: no OCR, no image analysis, no structured table analysis, and no `chunk_by_title`.
+NB: To reduce hosting costs and memory usage in production, the deployed backend uses a simplified PDF processing pipeline: no OCR, no image analysis, no structured table analysis, and no `chunk_by_title`, not like in the main branch.
 
 
 ## Tech Stack
