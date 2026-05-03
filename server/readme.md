@@ -4,6 +4,29 @@ FastAPI backend for project-scoped PDF document registration, PostgreSQL metadat
 
 All resource IDs (`project_id`, `document_id`) are UUID values.
 
+## Render / Low-Memory PDF Processing Note
+
+The PDF processing pipeline was simplified for deployment on low-memory hosts such as Render.
+
+Removed from the backend:
+
+- OCR processing.
+- Tesseract system packages and Python wrappers.
+- Poppler/image rendering helpers.
+- `unstructured` and `unstructured-inference`.
+- Image extraction and table structure inference.
+
+Current behavior:
+
+- The backend uses `pypdf` for native PDF text extraction.
+- PDF files are downloaded as a stream instead of loading the full response into memory.
+- Text is extracted page by page and split into chunks.
+- Images are ignored.
+- Tables are not parsed as structured tables; only extractable text is indexed.
+- Scanned or image-only PDFs will fail with a clear processing error because no OCR is available.
+
+This keeps the server smaller and easier to deploy, but users should upload text-based PDFs.
+
 ## UploadThing Workflow
 
 The frontend uploads the PDF directly to UploadThing. After UploadThing returns `file_url` and `file_key`, the frontend registers the document with the backend:
@@ -53,6 +76,11 @@ DATABASE_URL=postgresql://user:password@localhost:5432/chat_docs
 OPENAI_API_KEY=...
 PINECONE_API_KEY=...
 PINECONE_INDEX_NAME=chat-docs
+
+# Optional PDF text chunking settings
+PDF_CHUNK_MAX_CHARS=3000
+PDF_CHUNK_OVERLAP_CHARS=300
+PDF_VECTOR_BATCH_SIZE=50
 ```
 
 ## Run

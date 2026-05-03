@@ -7,7 +7,7 @@ DocChat is a full stack document chat application. Users create projects, upload
 - Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn-style UI components, TanStack Query.
 - Backend: FastAPI, SQLAlchemy, PostgreSQL.
 - File uploads: UploadThing.
-- Document parsing: Unstructured, PDF OCR/table/image extraction helpers.
+- Document parsing: lightweight native PDF text extraction with `pypdf`.
 - Vector database: Pinecone.
 - AI provider: OpenAI SDK for embeddings and chat completions.
 
@@ -32,8 +32,8 @@ flowchart TD
     E --> F[PostgreSQL stores document metadata with processing status]
     F --> G[FastAPI background task starts indexing]
     G --> H[Backend downloads the PDF from UploadThing]
-    H --> I[Unstructured parses PDF pages, tables, images, and OCR content]
-    I --> J[Chunks are created with chunk_by_title]
+    H --> I[pypdf extracts native text page by page]
+    I --> J[Text chunks are created without OCR or image processing]
     J --> K[OpenAI text-embedding-3-small creates embeddings]
     K --> L[Pinecone stores vectors with project_id, document_id, text, page, and file metadata]
 
@@ -65,20 +65,32 @@ uvicorn
 pydantic-settings
 sqlalchemy
 psycopg2-binary
-unstructured[pdf]
-unstructured-inference
+pypdf
 pinecone
 openai
 python-dotenv
 requests
 aiofiles
-pycryptodome
-pdf2image
-pillow
-pytesseract
 ```
 
-Depending on your operating system, PDF parsing and OCR may also require system tools such as Poppler and Tesseract.
+The backend intentionally avoids OCR and PDF image rendering dependencies such as Tesseract, Poppler, `pdf2image`, Pillow, `unstructured`, and `unstructured-inference`.
+
+## Render Deployment Note
+
+The PDF processing pipeline was simplified for low-memory deployment targets such as Render.
+
+Previous versions used `unstructured`, OCR helpers, Tesseract, Poppler, image extraction, and table/image processing. Those dependencies can make the Docker image heavier and may require more RAM than small Render instances can comfortably provide.
+
+Current behavior:
+
+- Only native text already embedded in the PDF is extracted.
+- Scanned PDFs and image-only pages are not processed.
+- Images are ignored.
+- Tables are not analyzed structurally; only text that `pypdf` can extract is indexed.
+- PDF files are downloaded as a stream and indexed page by page to reduce memory usage.
+- Vector upserts are batched with a small default batch size.
+
+This keeps the backend simpler and easier to deploy, but it also means users should upload text-based PDFs rather than scanned documents.
 
 ## Environment Variables
 
@@ -90,9 +102,10 @@ OPENAI_API_KEY=your_openai_api_key
 PINECONE_API_KEY=your_pinecone_api_key
 PINECONE_INDEX_NAME=chat-docs
 
-# Optional. The backend defaults to fast.
-# Use hi_res for better layout/table/image extraction, but it requires more memory.
-PDF_PARTITION_STRATEGY=fast
+# Optional PDF text chunking settings.
+PDF_CHUNK_MAX_CHARS=3000
+PDF_CHUNK_OVERLAP_CHARS=300
+PDF_VECTOR_BATCH_SIZE=50
 
 # Used by the backend when deleting files from UploadThing
 UPLOADTHING_SECRET=your_uploadthing_secret
@@ -228,6 +241,7 @@ npm run dev
 ## Notes
 
 - Only PDF uploads are accepted.
+- PDF parsing is text-only. OCR, image extraction, and table structure detection were removed to keep deployment lightweight on Render.
 - Pinecone vectors are filtered by `project_id`, so each chat request only retrieves chunks from the selected project.
 - The Pinecone index is created automatically if it does not exist. The configured dimension is `1536`, which matches `text-embedding-3-small`.
 - The backend allows CORS from `http://localhost:3000`.
