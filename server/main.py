@@ -39,6 +39,20 @@ from services import (
     require_project,
 )
 
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://doc-chat-project-06.vercel.app",
+]
+
+
+def get_cors_origins() -> List[str]:
+    raw_origins = os.getenv("CORS_ALLOW_ORIGINS") or os.getenv("ALLOWED_ORIGINS")
+    if not raw_origins:
+        return DEFAULT_CORS_ORIGINS
+
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,14 +64,6 @@ app = FastAPI(
     title="Chat with Document API",
     description="Project-scoped document registration using UploadThing file metadata.",
     lifespan=lifespan,
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 
@@ -216,6 +222,16 @@ async def chat_with_project(
     db.commit()
 
     return result
+
+
+app = CORSMiddleware(
+    app,
+    allow_origins=get_cors_origins(),
+    allow_origin_regex=os.getenv("CORS_ALLOW_ORIGIN_REGEX"),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 import uvicorn
 
