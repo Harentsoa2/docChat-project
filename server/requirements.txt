@@ -3,14 +3,9 @@ uvicorn
 pydantic-settings
 sqlalchemy
 psycopg2-binary
-unstructured[pdf]
-unstructured-inference
+pypdf
 pinecone
 openai
 python-dotenv
 requests
 aiofiles
-pycryptodome
-pdf2image
-pillow
-pytesseract

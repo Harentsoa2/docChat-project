@@ -1,8 +1,10 @@
 import os
+import re
 import tempfile
-from typing import Dict, List
+from typing import Dict, Iterator, List
 from uuid import UUID
 
+from pypdf import PdfReader
 import requests
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -12,7 +14,9 @@ load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "chat-docs")
-PDF_PARTITION_STRATEGY = os.getenv("PDF_PARTITION_STRATEGY", "fast")
+PDF_CHUNK_MAX_CHARS = int(os.getenv("PDF_CHUNK_MAX_CHARS", "3000"))
+PDF_CHUNK_OVERLAP_CHARS = int(os.getenv("PDF_CHUNK_OVERLAP_CHARS", "300"))
+PDF_VECTOR_BATCH_SIZE = int(os.getenv("PDF_VECTOR_BATCH_SIZE", "50"))
 
 _pinecone_client = None
 _openai_client = None
@@ -80,6 +84,77 @@ def delete_vectors_for_project(project_id: UUID) -> None:
     index.delete(filter={"project_id": {"$eq": str(project_id)}})
 
 
+def _download_pdf_to_tempfile(file_url: str) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        with requests.get(file_url, timeout=60, stream=True) as response:
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    tmp_file.write(chunk)
+        return tmp_file.name
+
+
+def _clean_pdf_text(text: str) -> str:
+    text = text.replace("\x00", "")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _split_text(text: str) -> List[str]:
+    text = _clean_pdf_text(text)
+    if not text:
+        return []
+
+    max_chars = max(PDF_CHUNK_MAX_CHARS, 500)
+    overlap = min(max(PDF_CHUNK_OVERLAP_CHARS, 0), max_chars // 3)
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+
+        if end < len(text):
+            min_cut = start + max_chars // 2
+            cut_points = [
+                text.rfind("\n\n", min_cut, end),
+                text.rfind("\n", min_cut, end),
+                text.rfind(". ", min_cut, end),
+                text.rfind(" ", min_cut, end),
+            ]
+            cut = max(cut_points)
+            if cut > start:
+                end = cut + 1
+
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+
+        if end >= len(text):
+            break
+
+        start = max(end - overlap, start + 1)
+
+    return chunks
+
+
+def _iter_pdf_chunks(pdf_path: str) -> Iterator[Dict]:
+    reader = PdfReader(pdf_path)
+    if reader.is_encrypted:
+        decrypt_result = reader.decrypt("")
+        if decrypt_result == 0:
+            raise RuntimeError("PDF is encrypted and cannot be read without a password")
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        page_text = _clean_pdf_text(page.extract_text() or "")
+        for content in _split_text(page_text):
+            yield {
+                "content": content,
+                "page_number": page_number,
+            }
+
+
 async def process_document_from_url(
     file_url: str,
     project_id: UUID,
@@ -87,45 +162,20 @@ async def process_document_from_url(
     filename: str,
 ):
     """Download the UploadThing file and index it for project-scoped RAG."""
-    from unstructured.chunking.title import chunk_by_title
-    from unstructured.partition.pdf import partition_pdf
-
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            response = requests.get(file_url, timeout=60)
-            response.raise_for_status()
-            tmp_file.write(response.content)
-            tmp_path = tmp_file.name
+        tmp_path = _download_pdf_to_tempfile(file_url)
 
-        partition_kwargs = {
-            "filename": tmp_path,
-            "strategy": PDF_PARTITION_STRATEGY,
-        }
-        if PDF_PARTITION_STRATEGY == "hi_res":
-            partition_kwargs.update(
-                {
-                    "infer_table_structure": True,
-                    "extract_image_block_types": ["Image"],
-                    "extract_image_block_to_payload": True,
-                }
-            )
-
-        elements = partition_pdf(**partition_kwargs)
-
-        chunks = chunk_by_title(
-            elements,
-            max_characters=3000,
-            new_after_n_chars=2400,
-            combine_text_under_n_chars=500,
-        )
-
-        index = init_pinecone()
+        index = None
         vectors = []
+        chunk_count = 0
 
-        for i, chunk in enumerate(chunks):
-            content = chunk.text
-            metadata = chunk.metadata.to_dict()
+        for i, chunk in enumerate(_iter_pdf_chunks(tmp_path)):
+            if index is None:
+                index = init_pinecone()
+
+            chunk_count += 1
+            content = chunk["content"]
             embedding = await embed_text(content)
 
             vectors.append(
@@ -136,19 +186,24 @@ async def process_document_from_url(
                         "project_id": str(project_id),
                         "document_id": str(document_id),
                         "text": content,
-                        "page_number": metadata.get("page_number", 1),
+                        "page_number": chunk["page_number"],
                         "filename": filename,
                         "file_url": file_url,
                     },
                 }
             )
 
-            if len(vectors) >= 100:
+            if len(vectors) >= PDF_VECTOR_BATCH_SIZE:
                 index.upsert(vectors=vectors)
                 vectors = []
 
         if vectors:
             index.upsert(vectors=vectors)
+
+        if chunk_count == 0:
+            raise RuntimeError(
+                "No extractable text found in PDF. Scanned PDFs and image-only pages are not processed."
+            )
 
         return True
     except Exception as exc:
